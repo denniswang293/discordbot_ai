@@ -1,9 +1,12 @@
 import datetime
 import json
+import asyncio
+import re
 from pathlib import Path
 
 import discord
 from discord.ext import commands
+from deep_translator import GoogleTranslator
 
 
 JSON_DIR = Path(__file__).resolve().parents[2] / "data" / "json"
@@ -77,6 +80,62 @@ class Snipe(commands.Cog):
       inline=False,
     )
     await ctx.send(embed=embed)
+
+  async def get_message_to_translate(self, ctx, message_link=None):
+    if message_link:
+      match = re.fullmatch(
+        r"https?://(?:www\.)?discord(?:app)?\.com/channels/"
+        r"(?:\d+|@me)/(\d+)/(\d+)",
+        message_link,
+      )
+      if not match:
+        return None, "請提供有效的 Discord 訊息連結。"
+
+      channel_id, message_id = map(int, match.groups())
+      channel = self.bot.get_channel(channel_id)
+      if channel is None:
+        try:
+          channel = await self.bot.fetch_channel(channel_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+          return None, "找不到這個頻道，或機器人沒有查看權限。"
+      try:
+        return await channel.fetch_message(message_id), None
+      except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        return None, "找不到這則訊息，或機器人沒有查看權限。"
+
+    reference = ctx.message.reference
+    if reference is None:
+      return None, "請回覆一則訊息，或提供 Discord 訊息連結。"
+    if isinstance(reference.resolved, discord.Message):
+      return reference.resolved, None
+
+    try:
+      channel = self.bot.get_channel(reference.channel_id) or ctx.channel
+      return await channel.fetch_message(reference.message_id), None
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+      return None, "找不到被回覆的訊息，或機器人沒有查看權限。"
+
+  @commands.command(name="translate", aliases=["tran"])
+  async def translate(self, ctx, message_link: str = None):
+    await self.delete_command_message(ctx)
+    message, error = await self.get_message_to_translate(ctx, message_link)
+    if error:
+      await ctx.send(error)
+      return
+    if not message.content.strip():
+      await ctx.send("這則訊息沒有可以翻譯的文字。")
+      return
+
+    try:
+      translated = await asyncio.to_thread(
+        GoogleTranslator(source="auto", target="zh-TW").translate,
+        message.content,
+      )
+    except Exception:
+      await ctx.send("翻譯失敗，請稍後再試。")
+      return
+
+    await ctx.send(translated[:2000])
 
   @commands.command(aliases=["Snipe", "SNIPE"])
   async def snipe(self, ctx, number: int = 1):
