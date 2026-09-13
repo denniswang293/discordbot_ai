@@ -1,4 +1,4 @@
-import discord,random,json,asyncio,datetime
+import discord,random,json,asyncio,datetime,os
 from pathlib import Path
 from discord.ext import commands
 import aiohttp
