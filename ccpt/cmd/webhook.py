@@ -369,7 +369,5 @@ class Web(commands.Cog):
 async def setup(bot):
     print("--- 開始執行 setup ---")
     cog = Web(bot)
-    print(f"Cog 物件類型: {type(cog)}")
     result = bot.add_cog(cog)
-    print(f"add_cog 回傳類型: {type(result)}")
     await result # 如果這行噴錯，代表 add_cog 回傳了 list
