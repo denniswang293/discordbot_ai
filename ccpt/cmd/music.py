@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -6,6 +7,9 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -129,8 +133,22 @@ class Music(commands.Cog):
     if voice is None:
       try:
         voice = await channel.connect()
-      except discord.ClientException:
-        await ctx.send("無法加入語音頻道，請稍後再試。")
+      except discord.Forbidden:
+        await ctx.send(
+          "Discord 拒絕了語音連線。請確認我在這個語音頻道有「連接」和「說話」權限。"
+        )
+        return None
+      except discord.ClientException as error:
+        logger.exception("連線到語音頻道時發生 Discord ClientException")
+        await ctx.send(f"無法加入語音頻道：{error}")
+        return None
+      except discord.HTTPException as error:
+        logger.exception("連線到語音頻道時發生 Discord HTTPException")
+        await ctx.send(f"Discord 語音連線失敗（HTTP {error.status}），請稍後再試。")
+        return None
+      except Exception as error:
+        logger.exception("連線到語音頻道時發生未預期錯誤")
+        await ctx.send(f"加入語音頻道失敗：{error}")
         return None
     elif voice.channel != channel:
       await ctx.send("我目前正在另一個語音頻道播放音樂。")

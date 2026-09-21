@@ -30,24 +30,31 @@ async def cl():
 class another(commands.Cog):
   def __init__(self,bot):
     self.bot=bot
-    
-    async def timew():
-      await self.bot.wait_until_ready()
-      while not self.bot.is_closed():
-        now=datetime.datetime.utcnow().strftime("%H%M%S")
-        if int(now[2:])>4800 and int(now[2:])<5500:
-          ch=self.bot.get_channel(1228204874429235290)
-          message=await ch.fetch_message(ch.last_message_id)
-          # if message.content == "編號已更換" and message.author.id == 1078261984862154793:
-          #   await cl()
-          # else:
-          await cl()
-            #await ch.send("編號已更換")
-          await asyncio.sleep(60*10)
-        else:
-          await asyncio.sleep(60*5)
-          pass
-    self.bg_task = self.bot.loop.create_task(timew())
+
+  async def cog_load(self):
+    # discord.py 2.7 不允許在 Cog 建構子直接存取 bot.loop。
+    # cog_load 會在 bot 已經處於非同步上下文時被呼叫。
+    self.bg_task = asyncio.create_task(self.timew())
+
+  async def cog_unload(self):
+    self.bg_task.cancel()
+
+  async def timew(self):
+    await self.bot.wait_until_ready()
+    while not self.bot.is_closed():
+      now=datetime.datetime.utcnow().strftime("%H%M%S")
+      if int(now[2:])>4800 and int(now[2:])<5500:
+        ch=self.bot.get_channel(1228204874429235290)
+        message=await ch.fetch_message(ch.last_message_id)
+        # if message.content == "編號已更換" and message.author.id == 1078261984862154793:
+        #   await cl()
+        # else:
+        await cl()
+          #await ch.send("編號已更換")
+        await asyncio.sleep(60*10)
+      else:
+        await asyncio.sleep(60*5)
+        pass
 
   @commands.command() 
   @commands.dm_only()
