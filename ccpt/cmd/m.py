@@ -1,16 +1,25 @@
 import datetime
 import json
 import asyncio
+import logging
 import re
 from pathlib import Path
 
 import discord
 from discord.ext import commands
 from deep_translator import GoogleTranslator
+from deep_translator.exceptions import TooManyRequests
 
 
 JSON_DIR = Path(__file__).resolve().parents[2] / "data" / "json"
 SNIPE_FILE = JSON_DIR / "snipe.json"
+logger = logging.getLogger(__name__)
+translation_lock = asyncio.Lock()
+
+
+def translate_with_google(text):
+  """Translate text through deep-translator's GoogleTranslator."""
+  return GoogleTranslator(source="auto", target="zh-TW").translate(text)
 
 
 def load_snipe_data():
@@ -127,12 +136,18 @@ class Snipe(commands.Cog):
       return
 
     try:
-      translated = await asyncio.to_thread(
-        GoogleTranslator(source="auto", target="zh-TW").translate,
-        message.content,
-      )
-    except Exception:
-      await ctx.send("翻譯失敗，請稍後再試。")
+      # 避免 Discord 同時收到多個翻譯指令時，瞬間打爆 API 限流。
+      async with translation_lock:
+        translated = await asyncio.to_thread(
+          translate_with_google,
+          message.content,
+        )
+    except Exception as error:
+      logger.exception("翻譯失敗")
+      if isinstance(error, TooManyRequests):
+        await ctx.send("Google 翻譯目前請求過多，請稍等幾分鐘後再試。")
+      else:
+        await ctx.send("翻譯失敗，請稍後再試。")
       return
 
     await ctx.send(translated[:2000])

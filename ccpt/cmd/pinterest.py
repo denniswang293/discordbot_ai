@@ -1,4 +1,3 @@
-"""Pinterest image search commands."""
 
 import asyncio
 import json
@@ -116,7 +115,7 @@ class Pinterest(commands.Cog):
     try:
       image_url = await asyncio.to_thread(fetch_random_pin, keyword)
     except PinterestError:
-      await ctx.send("Pinterest 搜尋失敗，或找不到符合的圖片，請稍後再試。")
+      await ctx.send("https://cdn.discordapp.com/attachments/942418770088063047/1289393633694453800/nknow.png?ex=6aab3de6&is=6aa9ec66&hm=f3a5e0778a04e2ae1241d1d80cc0d9e002212ba1a8d0300401ba91cb23c48559")
       return
     await ctx.send(image_url)
 
