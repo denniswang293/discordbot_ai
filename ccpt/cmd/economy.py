@@ -14,6 +14,7 @@ from typing import Any
 
 import discord
 from discord.ext import commands, tasks
+from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,14 @@ PLAYER_FILE = JSON_DIR / "player_data.json"
 MARKET_FILE = JSON_DIR / "market.json"
 LOG_FILE = JSON_DIR / "economy_log.json"
 BATTLE_IMAGE = PROJECT_ROOT / "ccpt" / "assets" / "economy" / "battle.png"
+BATTLE_FONT = PROJECT_ROOT / "ccpt" / "assets" / "economy" / "ch.ttf"
+BATTLE_FONT_CANDIDATES = (
+    BATTLE_FONT,
+    Path("C:/Windows/Fonts/msjh.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansTC-Regular.otf"),
+    Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+)
 
 EMBED_COLOUR = 0x00FFE1
 START_WALLET = 1000
@@ -93,6 +102,36 @@ WORK_MESSAGES = (
     "你做兼職賺到 {amount} 塊",
     "你收到市政府發的 {amount} 元消費券",
     "你打掃房間時翻到 {amount} 塊",
+    "你幫路邊的鴿子找回尊嚴，牠給了你 {amount} 塊",
+    "你打開冰箱，發現昨天的布丁下面壓著 {amount} 塊",
+    "你跟自動販賣機吵架吵贏了，獲得賠償 {amount} 塊",
+    "你在夢裡中樂透，醒來後枕頭旁真的有 {amount} 塊",
+    "你扶老奶奶過馬路，老奶奶反手塞給你 {amount} 塊",
+    "你在垃圾桶旁發現一個神秘紅包，裡面有 {amount} 塊",
+    "你成功說服一顆石頭投資你，獲得 {amount} 塊",
+    "你家的蟑螂繳房租了，共計 {amount} 塊",
+    "你按電梯按得特別準，管委會獎勵你 {amount} 塊",
+    "你對著天空大喊三聲有錢，結果掉下來 {amount} 塊",
+    "你撿到一隻會計算微積分的貓，牠支付你 {amount} 塊封口費",
+    "你把泡麵泡得剛剛好，聯合國頒發獎金 {amount} 塊",
+    "你昨天少睡了三小時，宇宙決定補償你 {amount} 塊",
+    "你成功阻止蚊子吸血，保險公司理賠你 {amount} 塊",
+    "你什麼都沒做，但系統不知道為什麼給了你 {amount} 塊",
+    "ATM 突然向你道歉，並吐出 {amount} 塊作為精神賠償",
+    "你成功告贏了重力，法院判賠你 {amount} 塊",
+    "你家的 Wi-Fi 今天特別穩，電信公司反而退你 {amount} 塊",
+    "你跟鏡子猜拳贏了，鏡子不甘願地給你 {amount} 塊",
+    "你踩到香蕉皮但沒有滑倒，世界線獎勵你 {amount} 塊",
+    "你盯著牆壁看了十分鐘，牆壁決定付你 {amount} 塊",
+    "你成功把 USB 一次插對，科技之神賞你 {amount} 塊",
+    "你打噴嚏的音量剛好 87 分貝，獲得獎金 {amount} 塊",
+    "你在紅綠燈前站太久，紅綠燈支付你 {amount} 塊誤工費",
+    "你跟 Google 翻譯吵架吵贏了，獲得 {amount} 塊和解金",
+    "你家的電風扇旋轉方向非常有藝術感，有人花 {amount} 塊買下版權",
+    "你成功讓泡麵調味包完整撕開，食品協會頒發 {amount} 塊獎金",
+    "你在凌晨三點突然理解了人生，宇宙匯給你 {amount} 塊",
+    "你對著微波爐說謝謝，微波爐感動到退你 {amount} 塊",
+    "你今天沒有忘記自己要做什麼，因此獲得 {amount} 塊成就獎金",
 )
 
 
@@ -514,6 +553,91 @@ class Economy(commands.Cog):
     @staticmethod
     def _footer_icon(member: discord.abc.User) -> str:
         return member.display_avatar.url
+
+    @staticmethod
+    def _render_battle_image(
+        attacker_avatar: bytes,
+        defender_avatar: bytes,
+        attacker_name: str,
+        defender_name: str,
+        attacker_power: int,
+        defender_power: int,
+    ) -> io.BytesIO:
+        with Image.open(BATTLE_IMAGE) as source:
+            battle = source.convert("RGBA")
+
+        def prepare_avatar(data: bytes) -> Image.Image:
+            with Image.open(io.BytesIO(data)) as avatar_source:
+                avatar = ImageOps.fit(
+                    avatar_source.convert("RGBA"),
+                    (100, 100),
+                    method=Image.Resampling.LANCZOS,
+                )
+            mask = Image.new("L", (100, 100), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, 99, 99), fill=255)
+            avatar.putalpha(mask)
+            return avatar
+
+        attacker_image = prepare_avatar(attacker_avatar)
+        defender_image = prepare_avatar(defender_avatar)
+        battle.alpha_composite(attacker_image, (56, 45))
+        battle.alpha_composite(defender_image, (309, 45))
+
+        font = None
+        for font_path in BATTLE_FONT_CANDIDATES:
+            try:
+                font = ImageFont.truetype(str(font_path), 18)
+                break
+            except OSError:
+                continue
+        if font is None:
+            font = ImageFont.load_default(size=18)
+        draw = ImageDraw.Draw(battle)
+        draw.multiline_text(
+            (55, 164),
+            f"{attacker_name[:12]}\nPOWER: {attacker_power:,}",
+            font=font,
+            fill=(0, 0, 0),
+            spacing=3,
+        )
+        draw.multiline_text(
+            (308, 164),
+            f"{defender_name[:12]}\nPOWER: {defender_power:,}",
+            font=font,
+            fill=(0, 0, 0),
+            spacing=3,
+        )
+
+        buffer = io.BytesIO()
+        battle.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer
+
+    async def build_battle_image(
+        self,
+        attacker: discord.Member,
+        defender: discord.Member,
+        attacker_power: int,
+        defender_power: int,
+    ) -> io.BytesIO:
+        """Download display avatars and composite the battle card in memory."""
+        try:
+            attacker_avatar, defender_avatar = await asyncio.gather(
+                attacker.display_avatar.replace(size=256, format="png").read(),
+                defender.display_avatar.replace(size=256, format="png").read(),
+            )
+            return await asyncio.to_thread(
+                self._render_battle_image,
+                attacker_avatar,
+                defender_avatar,
+                attacker.display_name,
+                defender.display_name,
+                attacker_power,
+                defender_power,
+            )
+        except (discord.HTTPException, OSError, UnidentifiedImageError, ValueError):
+            logger.exception("無法產生 Fight 戰鬥圖片，改用原始模板")
+            return io.BytesIO(BATTLE_IMAGE.read_bytes())
 
     async def _require_player(self, ctx: commands.Context) -> bool:
         if self.player_exists(ctx.author.id):
@@ -1291,12 +1415,7 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text="敵方軍隊、戰力與勝率會在確認攻擊後公開")
         view = FightConfirmationView(ctx.author.id)
-        send_kwargs: dict[str, Any] = {"embed": embed, "view": view}
-        if BATTLE_IMAGE.exists():
-            battle_buffer = io.BytesIO(BATTLE_IMAGE.read_bytes())
-            send_kwargs["file"] = discord.File(battle_buffer, filename="battle.png")
-            embed.set_image(url="attachment://battle.png")
-        message = await ctx.send(**send_kwargs)
+        message = await ctx.send(embed=embed, view=view)
         view.message = message
         await view.wait()
         if view.confirmed is not True:
@@ -1427,7 +1546,15 @@ class Economy(commands.Cog):
                 f"守方傷亡 {defender_loss_rate:.1%}｜攻擊冷卻 10 分鐘"
             )
         )
-        await message.edit(embed=embed, view=view)
+        battle_buffer = await self.build_battle_image(
+            ctx.author,
+            member,
+            attacker_power,
+            defender_power,
+        )
+        battle_file = discord.File(battle_buffer, filename="battle.png")
+        embed.set_image(url="attachment://battle.png")
+        await message.edit(embed=embed, view=view, attachments=[battle_file])
 
     # ----------------------------- leaderboard ------------------------------
 
