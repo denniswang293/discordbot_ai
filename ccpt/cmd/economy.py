@@ -920,10 +920,6 @@ class Economy(commands.Cog):
             colour=EMBED_COLOUR,
             timestamp=discord.utils.utcnow(),
         )
-        embed.add_field(name="稀有度", value=f"{rarity['id']}（權重 {rarity['weight']}）")
-        embed.add_field(name="物品類別", value=str(item["category"]))
-        embed.add_field(name="基礎價格", value=f"{item['base_price']:,} 塊")
-        embed.add_field(name="稀有度倍率", value=f"×{rarity['price_multiplier']:g}")
         embed.add_field(name="自動出售", value=f"+{amount:,} 塊（已存入錢包）", inline=False)
         embed.set_footer(text="魚獲不進背包，會立即出售；下次釣魚 60 秒後可用。")
         await ctx.send(embed=embed)
