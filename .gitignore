@@ -7,6 +7,7 @@ data/*.db
 data/*.db-*
 data/backups/
 data/json/*.json
+!data/json/economy.json
 
 # 只有確認可公開時，才提交這個資料檔
 !data/json/data.json

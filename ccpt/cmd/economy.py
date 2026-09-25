@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 JSON_DIR = PROJECT_ROOT / "data" / "json"
+ECONOMY_CONFIG_FILE = JSON_DIR / "economy.json"
 PLAYER_FILE = JSON_DIR / "player_data.json"
 MARKET_FILE = JSON_DIR / "market.json"
 LOG_FILE = JSON_DIR / "economy_log.json"
@@ -95,45 +96,6 @@ MARKET_RULES = {
     "SSR": (720, 900, 10),
 }
 START_ATTACK = {"N": 3, "R": 3, "SR": 1, "UR": 0, "SSR": 0}
-WORK_MESSAGES = (
-    "你在路上撿到 {amount} 塊",
-    "老闆發薪水，給了你 {amount} 塊",
-    "你在口袋裡發現 {amount} 塊",
-    "你做兼職賺到 {amount} 塊",
-    "你收到市政府發的 {amount} 元消費券",
-    "你打掃房間時翻到 {amount} 塊",
-    "你幫路邊的鴿子找回尊嚴，牠給了你 {amount} 塊",
-    "你打開冰箱，發現昨天的布丁下面壓著 {amount} 塊",
-    "你跟自動販賣機吵架吵贏了，獲得賠償 {amount} 塊",
-    "你在夢裡中樂透，醒來後枕頭旁真的有 {amount} 塊",
-    "你扶老奶奶過馬路，老奶奶反手塞給你 {amount} 塊",
-    "你在垃圾桶旁發現一個神秘紅包，裡面有 {amount} 塊",
-    "你成功說服一顆石頭投資你，獲得 {amount} 塊",
-    "你家的蟑螂繳房租了，共計 {amount} 塊",
-    "你按電梯按得特別準，管委會獎勵你 {amount} 塊",
-    "你對著天空大喊三聲有錢，結果掉下來 {amount} 塊",
-    "你撿到一隻會計算微積分的貓，牠支付你 {amount} 塊封口費",
-    "你把泡麵泡得剛剛好，聯合國頒發獎金 {amount} 塊",
-    "你昨天少睡了三小時，宇宙決定補償你 {amount} 塊",
-    "你成功阻止蚊子吸血，保險公司理賠你 {amount} 塊",
-    "你什麼都沒做，但系統不知道為什麼給了你 {amount} 塊",
-    "ATM 突然向你道歉，並吐出 {amount} 塊作為精神賠償",
-    "你成功告贏了重力，法院判賠你 {amount} 塊",
-    "你家的 Wi-Fi 今天特別穩，電信公司反而退你 {amount} 塊",
-    "你跟鏡子猜拳贏了，鏡子不甘願地給你 {amount} 塊",
-    "你踩到香蕉皮但沒有滑倒，世界線獎勵你 {amount} 塊",
-    "你盯著牆壁看了十分鐘，牆壁決定付你 {amount} 塊",
-    "你成功把 USB 一次插對，科技之神賞你 {amount} 塊",
-    "你打噴嚏的音量剛好 87 分貝，獲得獎金 {amount} 塊",
-    "你在紅綠燈前站太久，紅綠燈支付你 {amount} 塊誤工費",
-    "你跟 Google 翻譯吵架吵贏了，獲得 {amount} 塊和解金",
-    "你家的電風扇旋轉方向非常有藝術感，有人花 {amount} 塊買下版權",
-    "你成功讓泡麵調味包完整撕開，食品協會頒發 {amount} 塊獎金",
-    "你在凌晨三點突然理解了人生，宇宙匯給你 {amount} 塊",
-    "你對著微波爐說謝謝，微波爐感動到退你 {amount} 塊",
-    "你今天沒有忘記自己要做什麼，因此獲得 {amount} 塊成就獎金",
-)
-
 
 class EconomyDataError(RuntimeError):
     """Raised when an economy JSON file exists but cannot be trusted."""
@@ -247,10 +209,25 @@ def random_fraction(amount: int, low: float = 1 / 9, high: float = 1 / 3) -> int
     return random.randint(minimum, maximum)
 
 
+def weighted_choice(options: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose one configured option by its non-negative ``weight`` value."""
+    if not options:
+        raise EconomyDataError("加權選項不可為空")
+    weights = [float(option.get("weight", 0)) for option in options]
+    if any(weight < 0 for weight in weights) or not any(weights):
+        raise EconomyDataError("加權選項必須至少有一個正權重")
+    return random.choices(options, weights=weights, k=1)[0]
+
+
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.data_lock = asyncio.Lock()
+
+        if not ECONOMY_CONFIG_FILE.exists():
+            raise EconomyDataError(f"找不到 Economy 設定檔：{ECONOMY_CONFIG_FILE}")
+        loaded_config = self._load_json(ECONOMY_CONFIG_FILE, {})
+        self.config = self._validate_config(loaded_config)
 
         self.players: dict[str, dict[str, Any]] = self._load_json(PLAYER_FILE, {})
         loaded_market = self._load_json(MARKET_FILE, DEFAULT_MARKET)
@@ -322,6 +299,75 @@ class Economy(commands.Cog):
                 raise EconomyDataError(f"market.json 的 {item} 價格必須是正整數")
             market[item] = value
         return market
+
+    @staticmethod
+    def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
+        """Validate the static economy config once when the Cog is loaded."""
+        config = copy.deepcopy(data)
+        general = data.get("general", {})
+        if not isinstance(general, dict):
+            raise EconomyDataError("economy.json 的 general 必須是物件")
+        config["general"] = copy.deepcopy(general)
+
+        fishing = data.get("fishing")
+        if not isinstance(fishing, dict):
+            raise EconomyDataError("economy.json 的 fishing 必須是物件")
+
+        cooldown = fishing.get("cooldown")
+        if isinstance(cooldown, bool) or not isinstance(cooldown, (int, float)) or cooldown <= 0:
+            raise EconomyDataError("economy.json 的 fishing.cooldown 必須是正數")
+
+        def validate_options(
+            key: str,
+            required: tuple[str, ...],
+        ) -> list[dict[str, Any]]:
+            options = fishing.get(key)
+            if not isinstance(options, list) or not options:
+                raise EconomyDataError(f"economy.json 的 fishing.{key} 必須是非空陣列")
+            validated: list[dict[str, Any]] = []
+            ids: set[str] = set()
+            for option in options:
+                if not isinstance(option, dict) or any(field not in option for field in required):
+                    raise EconomyDataError(f"economy.json 的 fishing.{key} 選項格式錯誤")
+                item = copy.deepcopy(option)
+                option_id = item.get("id")
+                weight = item.get("weight")
+                if not isinstance(option_id, str) or not option_id.strip() or option_id in ids:
+                    raise EconomyDataError(f"economy.json 的 fishing.{key} id 必須唯一且為文字")
+                if isinstance(weight, bool) or not isinstance(weight, (int, float)) or weight < 0:
+                    raise EconomyDataError(f"economy.json 的 fishing.{key} weight 必須是非負數")
+                ids.add(option_id)
+                validated.append(item)
+            if not any(float(option["weight"]) > 0 for option in validated):
+                raise EconomyDataError(f"economy.json 的 fishing.{key} 至少需要一個正權重")
+            return validated
+
+        rarities = validate_options("rarities", ("id", "name", "weight", "price_multiplier"))
+        for rarity in rarities:
+            multiplier = rarity["price_multiplier"]
+            if isinstance(multiplier, bool) or not isinstance(multiplier, (int, float)) or multiplier <= 0:
+                raise EconomyDataError("economy.json 的稀有度 price_multiplier 必須是正數")
+
+        items = validate_options("items", ("id", "name", "category", "base_price", "weight"))
+        for item in items:
+            price = item["base_price"]
+            if isinstance(price, bool) or not isinstance(price, (int, float)) or price < 0:
+                raise EconomyDataError("economy.json 的物品 base_price 必須是非負數")
+
+        config["fishing"] = {"cooldown": cooldown, "rarities": rarities, "items": items}
+        if isinstance(data.get("general"), dict):
+            config["general"].update(copy.deepcopy(data["general"]))
+
+        work = data.get("work")
+        if not isinstance(work, dict) or not isinstance(work.get("messages"), list) or not work["messages"]:
+            raise EconomyDataError("economy.json 的 work.messages 必須是非空陣列")
+        if not all(isinstance(message, str) and message.strip() for message in work["messages"]):
+            raise EconomyDataError("economy.json 的 work.messages 必須全部是非空文字")
+        config["work"] = {
+            "cooldown": work.get("cooldown", 6),
+            "messages": copy.deepcopy(work["messages"]),
+        }
+        return config
 
     def _ensure_data_files(self) -> None:
         JSON_DIR.mkdir(parents=True, exist_ok=True)
@@ -818,6 +864,11 @@ class Economy(commands.Cog):
         if not await self._require_player(ctx):
             self._reset_cooldown(ctx)
             return
+        messages = self.config.get("work", {}).get("messages", [])
+        if not messages:
+            self._reset_cooldown(ctx)
+            await ctx.send("目前沒有可用的工作設定。")
+            return
         reward = random.randint(100, 499)
         async with self.data_lock:
             player = self.players.get(str(ctx.author.id))
@@ -828,7 +879,54 @@ class Economy(commands.Cog):
             self._append_log(ctx.author.id, self.logs, "work", amount=reward)
             await self._save_players()
             await self._save_logs()
-        await ctx.send(random.choice(WORK_MESSAGES).format(amount=reward))
+        message = random.choice(messages)
+        message = str(message).replace("${amount}", f"${reward:,}")
+        message = message.replace("{amount}", f"{reward:,}")
+        await ctx.send(message)
+
+    @commands.command(name="fish", aliases=["釣魚", "Fishing", "FISH"])
+    @commands.cooldown(1, 60, commands.BucketType.user)
+    async def fish(self, ctx: commands.Context) -> None:
+        """Catch one weighted item and immediately sell it for wallet money."""
+        if not await self._require_player(ctx):
+            self._reset_cooldown(ctx)
+            return
+
+        fishing = self.config["fishing"]
+        item = weighted_choice(fishing["items"])
+        rarity = weighted_choice(fishing["rarities"])
+        amount = round(item["base_price"] * rarity["price_multiplier"])
+
+        async with self.data_lock:
+            player = self.players.get(str(ctx.author.id))
+            if player is None:
+                self._reset_cooldown(ctx)
+                return
+            player["wallet"] += amount
+            self._append_log(
+                ctx.author.id,
+                self.logs,
+                "fish",
+                item=item["id"],
+                rarity=rarity["id"],
+                amount=amount,
+            )
+            await self._save_players()
+            await self._save_logs()
+
+        embed = discord.Embed(
+            title="🎣 釣魚成功",
+            description=f"你釣到了 **{rarity['name']} {item['name']}**！",
+            colour=EMBED_COLOUR,
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.add_field(name="稀有度", value=f"{rarity['id']}（權重 {rarity['weight']}）")
+        embed.add_field(name="物品類別", value=str(item["category"]))
+        embed.add_field(name="基礎價格", value=f"{item['base_price']:,} 塊")
+        embed.add_field(name="稀有度倍率", value=f"×{rarity['price_multiplier']:g}")
+        embed.add_field(name="自動出售", value=f"+{amount:,} 塊（已存入錢包）", inline=False)
+        embed.set_footer(text="魚獲不進背包，會立即出售；下次釣魚 60 秒後可用。")
+        await ctx.send(embed=embed)
 
     @commands.command(name="daily", aliases=["Daily", "DAILY", "daliy", "Daliy"])
     @commands.cooldown(1, 24 * 60 * 60, commands.BucketType.user)
