@@ -1,6 +1,7 @@
 # 一個爛bot(把以前寫過的一些bot東拼西凑讓他能勉强上線)
 ## 縫合了 大概是2021-22期間寫的3只機器人的 **奇美拉機器人**
-    
+
+```   
      ..-:\oo-.    .:oo/:-.
     -oooooooooooooooooooooo.                            __                                                          ___
    -oooooooooooooooooooooooo.           OOOOOOOOO:-.   `MM`     _.._        _.._        _.._     ____  _       _.   OOO.
@@ -12,3 +13,4 @@
  ooooooo/ooooooooooooo//oooooo/
  `.:ooooo/``.------.`.\oooo/:.
      `.-:`            .:-.`
+```
