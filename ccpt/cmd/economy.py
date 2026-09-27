@@ -152,6 +152,57 @@ class FightConfirmationView(discord.ui.View):
                 pass
 
 
+class ConfirmationView(discord.ui.View):
+    """Button confirmation used by Economy transactions."""
+
+    def __init__(self, author_id: int, *, timeout: float = 20):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.confirmed: bool | None = None
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message("只有發起操作的玩家可以按這些按鈕。", ephemeral=True)
+        return False
+
+    def disable_buttons(self) -> None:
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+    async def finish(self, interaction: discord.Interaction, confirmed: bool) -> None:
+        self.confirmed = confirmed
+        self.disable_buttons()
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="確認", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm_button(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        await self.finish(interaction, True)
+
+    @discord.ui.button(label="取消", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        _button: discord.ui.Button,
+    ) -> None:
+        await self.finish(interaction, False)
+
+    async def on_timeout(self) -> None:
+        self.disable_buttons()
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
 def normalize_card(value: str | None) -> str | None:
     if value is None:
         return None
@@ -691,33 +742,6 @@ class Economy(commands.Cog):
         await ctx.send(f"請先使用 `{ctx.clean_prefix}start` 建立帳號。")
         return False
 
-    async def _confirm(
-        self,
-        ctx: commands.Context,
-        message: discord.Message,
-        *,
-        timeout: float = 20,
-    ) -> bool | None:
-        try:
-            await message.add_reaction("✅")
-            await message.add_reaction("❌")
-        except discord.HTTPException:
-            await ctx.send("無法加入確認反應，請檢查機器人的反應權限。")
-            return False
-
-        def check(reaction: discord.Reaction, user: discord.abc.User) -> bool:
-            return (
-                user.id == ctx.author.id
-                and reaction.message.id == message.id
-                and str(reaction.emoji) in {"✅", "❌"}
-            )
-
-        try:
-            reaction, _ = await self.bot.wait_for("reaction_add", timeout=timeout, check=check)
-        except asyncio.TimeoutError:
-            return None
-        return str(reaction.emoji) == "✅"
-
     @staticmethod
     def _transaction_embed(title: str = "交易現場") -> discord.Embed:
         return discord.Embed(title=title, colour=EMBED_COLOUR, timestamp=discord.utils.utcnow())
@@ -794,9 +818,11 @@ class Economy(commands.Cog):
     async def delete_account(self, ctx: commands.Context) -> None:
         if not await self._require_player(ctx):
             return
-        message = await ctx.send("確定刪除 Economy 帳號嗎？此操作無法復原。")
-        confirmed = await self._confirm(ctx, message)
-        if not confirmed:
+        view = ConfirmationView(ctx.author.id)
+        message = await ctx.send("確定刪除 Economy 帳號嗎？此操作無法復原。", view=view)
+        view.message = message
+        await view.wait()
+        if view.confirmed is not True:
             await message.edit(content="已取消或確認逾時。")
             return
 
@@ -1299,12 +1325,14 @@ class Economy(commands.Cog):
         embed = self._transaction_embed()
         embed.add_field(name="送出", value=summary)
         embed.add_field(name="寄件人 → 收件人", value=f"{ctx.author.mention} → {member.mention}", inline=False)
-        embed.set_footer(text="請按 ✅ 確認，或按 ❌ 取消")
-        message = await ctx.send(embed=embed)
-        confirmed = await self._confirm(ctx, message)
-        if not confirmed:
+        embed.set_footer(text="請按按鈕確認或取消")
+        view = ConfirmationView(ctx.author.id)
+        message = await ctx.send(embed=embed, view=view)
+        view.message = message
+        await view.wait()
+        if view.confirmed is not True:
             embed.set_footer(text="已取消或確認逾時")
-            await message.edit(embed=embed)
+            await message.edit(embed=embed, view=view)
             self._reset_cooldown(ctx)
             return
 
@@ -1369,12 +1397,14 @@ class Economy(commands.Cog):
 
         embed = self._transaction_embed("賭博現場")
         embed.add_field(name="下注", value=f"{parsed:,} 塊")
-        embed.set_footer(text="請按 ✅ 確認，或按 ❌ 取消")
-        message = await ctx.send(embed=embed)
-        confirmed = await self._confirm(ctx, message)
-        if not confirmed:
+        embed.set_footer(text="請按按鈕確認或取消")
+        view = ConfirmationView(ctx.author.id)
+        message = await ctx.send(embed=embed, view=view)
+        view.message = message
+        await view.wait()
+        if view.confirmed is not True:
             embed.set_footer(text="已取消或確認逾時")
-            await message.edit(embed=embed)
+            await message.edit(embed=embed, view=view)
             self._reset_cooldown(ctx)
             return
 
