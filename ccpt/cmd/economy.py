@@ -44,7 +44,7 @@ DEFENSE_POWER_BONUS = 1.10
 DEFAULT_DEFENSE_RATIO = 0.30
 WINNER_CASUALTY_RANGE = (0.10, 0.25)
 LOSER_CASUALTY_RANGE = (0.30, 0.50)
-SAFE_BANK = 1500
+SAFE_BANK = 5000
 LOOT_RATE_RANGE = (0.05, 0.10)
 LOOT_PER_POWER = 15
 DEFENSE_SUCCESS_PROTECTION = 30 * 60
@@ -317,22 +317,6 @@ class Economy(commands.Cog):
         if isinstance(cooldown, bool) or not isinstance(cooldown, (int, float)) or cooldown <= 0:
             raise EconomyDataError("economy.json 的 fishing.cooldown 必須是正數")
 
-        events = fishing.get("events")
-        if not isinstance(events, dict):
-            raise EconomyDataError("economy.json 的 fishing.events 必須是物件")
-        broken_rod_chance = events.get("broken_rod_chance")
-        fine_chance = events.get("fine_chance")
-        fine_bank_rate = events.get("fine_bank_rate")
-        for name, value in (
-            ("broken_rod_chance", broken_rod_chance),
-            ("fine_chance", fine_chance),
-            ("fine_bank_rate", fine_bank_rate),
-        ):
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
-                raise EconomyDataError(f"economy.json 的 fishing.events.{name} 必須介於 0 和 1 之間")
-        if broken_rod_chance + fine_chance > 1:
-            raise EconomyDataError("economy.json 的 fishing.events 機率總和不能超過 1")
-
         def validate_options(
             key: str,
             required: tuple[str, ...],
@@ -370,16 +354,7 @@ class Economy(commands.Cog):
             if isinstance(price, bool) or not isinstance(price, (int, float)) or price < 0:
                 raise EconomyDataError("economy.json 的物品 base_price 必須是非負數")
 
-        config["fishing"] = {
-            "cooldown": cooldown,
-            "events": {
-                "broken_rod_chance": broken_rod_chance,
-                "fine_chance": fine_chance,
-                "fine_bank_rate": fine_bank_rate,
-            },
-            "rarities": rarities,
-            "items": items,
-        }
+        config["fishing"] = {"cooldown": cooldown, "rarities": rarities, "items": items}
         if isinstance(data.get("general"), dict):
             config["general"].update(copy.deepcopy(data["general"]))
 
@@ -910,7 +885,7 @@ class Economy(commands.Cog):
         await ctx.send(message)
 
     @commands.command(name="fish", aliases=["釣魚", "Fishing", "FISH"])
-    @commands.cooldown(1, 60, commands.BucketType.user)
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def fish(self, ctx: commands.Context) -> None:
         """Catch one weighted item and immediately sell it for wallet money."""
         if not await self._require_player(ctx):
@@ -918,46 +893,6 @@ class Economy(commands.Cog):
             return
 
         fishing = self.config["fishing"]
-        events = fishing["events"]
-        event_roll = random.random()
-        if event_roll < events["broken_rod_chance"]:
-            async with self.data_lock:
-                if self.players.get(str(ctx.author.id)) is None:
-                    self._reset_cooldown(ctx)
-                    return
-                self._append_log(
-                    ctx.author.id,
-                    self.logs,
-                    "fish",
-                    event="broken_rod",
-                    amount=0,
-                )
-                await self._save_logs()
-            await ctx.send("🎣 魚竿斷掉了，這次沒有任何收穫。")
-            return
-
-        if event_roll < events["broken_rod_chance"] + events["fine_chance"]:
-            async with self.data_lock:
-                player = self.players.get(str(ctx.author.id))
-                if player is None:
-                    self._reset_cooldown(ctx)
-                    return
-                penalty = int(player["bank"] * events["fine_bank_rate"])
-                player["bank"] = max(0, player["bank"] - penalty)
-                self._append_log(
-                    ctx.author.id,
-                    self.logs,
-                    "fish",
-                    event="bank_fine",
-                    amount=-penalty,
-                )
-                await self._save_players()
-                await self._save_logs()
-            await ctx.send(
-                f"🎣 釣魚違規，被罰款 {penalty:,} 塊（銀行餘額的 {events['fine_bank_rate']:.1%}）。"
-            )
-            return
-
         item = weighted_choice(fishing["items"])
         rarity = weighted_choice(fishing["rarities"])
         amount = round(item["base_price"] * rarity["price_multiplier"])
@@ -985,8 +920,8 @@ class Economy(commands.Cog):
             colour=EMBED_COLOUR,
             timestamp=discord.utils.utcnow(),
         )
-        embed.add_field(name="自動出售", value=f"+{amount:,} 塊（已存入錢包）", inline=False)
-        embed.set_footer(text="魚獲不進背包，會立即出售；下次釣魚 60 秒後可用。")
+        embed.add_field(name="出售", value=f"+{amount:,} 塊（已存入錢包）", inline=False)
+        embed.set_footer(text="下次釣魚 10 秒後可用。")
         await ctx.send(embed=embed)
 
     @commands.command(name="daily", aliases=["Daily", "DAILY", "daliy", "Daliy"])

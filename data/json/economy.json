@@ -44,12 +44,7 @@
     ]
   },
   "fishing": {
-    "cooldown": 60,
-    "events": {
-      "broken_rod_chance": 0.02,
-      "fine_chance": 0.01,
-      "fine_bank_rate": 0.01
-    },
+    "cooldown": 10,
     "rarities": [
       {"id": "N", "name": "普通", "weight": 50, "price_multiplier": 1.0},
       {"id": "R", "name": "稀有", "weight": 25, "price_multiplier": 1.1},
@@ -105,9 +100,9 @@
       {"id": "meteorite", "name": "小塊隕石", "base_price": 1600, "weight": 1},
       {"id": "dragon_scale", "name": "疑似龍鱗", "base_price": 1400, "weight": 1},
       {"id": "mermaid_tears", "name": "美人魚的眼淚", "base_price": 1000, "weight": 1},
-      {"id": "lost_satellite", "name": "迷你失聯衛星", "base_price": 1900, "weight": 1},
-      {"id": "treasure_map", "name": "國家級寶藏地圖", "base_price": 1250, "weight": 1},
-      {"id": "cosmic_fish", "name": "宇宙鯉魚王", "base_price": 3000, "weight": 1}
+      {"id": "pig", "name": "碳烤五花肉", "base_price": 1900, "weight": 1},
+      {"id": "super_earth_flag", "name": "超級地球旗幟", "base_price": 1250, "weight": 1},
+      {"id": "Ogon_no_kaiten", "name": "完美的黃金迴旋", "base_price": 3000, "weight": 1}
     ]
   }
 }
