@@ -45,6 +45,11 @@
   },
   "fishing": {
     "cooldown": 10,
+    "events": {
+      "broken_rod_chance": 0.02,
+      "fine_chance": 0.01,
+      "fine_bank_rate": 0.01
+    },
     "rarities": [
       {"id": "N", "name": "普通", "weight": 50, "price_multiplier": 1.0},
       {"id": "R", "name": "稀有", "weight": 25, "price_multiplier": 1.1},
