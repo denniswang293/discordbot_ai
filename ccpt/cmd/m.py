@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from urllib.parse import quote, unquote, urlsplit
 
 import discord
 from discord.ext import commands
@@ -15,6 +16,93 @@ JSON_DIR = Path(__file__).resolve().parents[2] / "data" / "json"
 SNIPE_FILE = JSON_DIR / "snipe.json"
 logger = logging.getLogger(__name__)
 translation_lock = asyncio.Lock()
+
+
+STEAM_COMMAND_USAGE = (
+  "用法：`ai-steam <Steam 網址>`\n"
+  "若要直接啟動遊戲：`ai-steam run <商店網址或遊戲 ID>`"
+)
+
+
+def _steam_game_id(value):
+  """Extract a numeric app ID from a Steam store URL or a bare ID."""
+  value = value.strip().strip("<>")
+  if value.isdigit():
+    return value
+
+  try:
+    parsed = urlsplit(value)
+  except ValueError:
+    return None
+  if parsed.scheme.lower() not in {"http", "https"}:
+    return None
+  if (parsed.hostname or "").lower().rstrip(".") not in {
+    "store.steampowered.com",
+    "www.store.steampowered.com",
+  }:
+    return None
+
+  parts = [part for part in parsed.path.split("/") if part]
+  if len(parts) >= 2 and parts[0].lower() == "app" and parts[1].isdigit():
+    return parts[1]
+  return None
+
+
+def convert_steam_url(value):
+  """Convert a supported Steam webpage URL to a Steam client URI."""
+  value = (value or "").strip()
+  if not value:
+    return None
+
+  run_match = re.fullmatch(r"run(?:game)?\s+(.+)", value, re.IGNORECASE)
+  if run_match:
+    game_id = _steam_game_id(run_match.group(1))
+    return f"steam://rungameid/{game_id}" if game_id else None
+
+  value = value.strip("<>")
+  try:
+    parsed = urlsplit(value)
+  except ValueError:
+    return None
+  if parsed.scheme.lower() not in {"http", "https"}:
+    return None
+
+  host = (parsed.hostname or "").lower().rstrip(".")
+  parts = [unquote(part) for part in parsed.path.split("/") if part]
+  lowered_parts = [part.lower() for part in parts]
+
+  if host in {"store.steampowered.com", "www.store.steampowered.com"}:
+    game_id = _steam_game_id(value)
+    return f"steam://store/{game_id}" if game_id else None
+
+  if host not in {"steamcommunity.com", "www.steamcommunity.com"}:
+    return None
+
+  # These client pages refer to the signed-in user, so the profile prefix in
+  # the webpage URL (for example /my/ or /id/name/) is intentionally ignored.
+  if "tradeoffers" in lowered_parts:
+    return "steam://url/OpenTradeOffers"
+  if "inventory" in lowered_parts:
+    return "steam://url/CommunityInventory"
+  if "friends" in lowered_parts:
+    return "steam://url/SteamIDFriends"
+
+  if len(parts) >= 2 and lowered_parts[0] == "id" and parts[1]:
+    custom_id = quote(parts[1], safe="-_.~")
+    return f"steam://url/CommunityFilePage/{custom_id}"
+
+  if (
+    len(parts) >= 2
+    and lowered_parts[0] == "profiles"
+    and parts[1].isdigit()
+  ):
+    return f"steam://url/SteamIDPage/{parts[1]}"
+
+  # A Steam Community game hub identifies an app and can be converted into a
+  # direct-launch URI. Store pages remain store-opening links by default.
+  if len(parts) >= 2 and lowered_parts[0] == "app" and parts[1].isdigit():
+    return f"steam://rungameid/{parts[1]}"
+  return None
 
 
 def translate_with_google(text):
@@ -151,6 +239,15 @@ class Snipe(commands.Cog):
       return
 
     await ctx.send(translated[:2000])
+
+  @commands.command(name="steam")
+  async def steam(self, ctx, *, url=None):
+    """將 Steam 網頁網址轉成可由 Steam 用戶端開啟的 URI。"""
+    converted = convert_steam_url(url)
+    if converted is None:
+      await ctx.send(f"無法辨識這個 Steam 網址。\n{STEAM_COMMAND_USAGE}")
+      return
+    await ctx.send(converted)
 
   @commands.command(aliases=["Snipe", "SNIPE"])
   async def snipe(self, ctx, number: int = 1):
