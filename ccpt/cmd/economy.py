@@ -375,11 +375,9 @@ class Economy(commands.Cog):
             raise EconomyDataError("economy.json 的 fishing.events 必須是物件")
         broken_rod_chance = events.get("broken_rod_chance")
         fine_chance = events.get("fine_chance")
-        fine_bank_rate = events.get("fine_bank_rate")
         for name, value in (
             ("broken_rod_chance", broken_rod_chance),
             ("fine_chance", fine_chance),
-            ("fine_bank_rate", fine_bank_rate),
         ):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 raise EconomyDataError(f"economy.json 的 fishing.events.{name} 必須介於 0 和 1 之間")
@@ -428,7 +426,6 @@ class Economy(commands.Cog):
             "events": {
                 "broken_rod_chance": broken_rod_chance,
                 "fine_chance": fine_chance,
-                "fine_bank_rate": fine_bank_rate,
             },
             "rarities": rarities,
             "items": items,
@@ -970,19 +967,21 @@ class Economy(commands.Cog):
                 if player is None:
                     self._reset_cooldown(ctx)
                     return
-                penalty = int(player["bank"] * events["fine_bank_rate"])
-                player["bank"] = max(0, player["bank"] - penalty)
+                account = "wallet" if player["wallet"] > 0 else "bank"
+                penalty = random_fraction(player[account])
+                player[account] -= penalty
                 self._append_log(
                     ctx.author.id,
                     self.logs,
                     "fish",
                     event="bank_fine",
                     amount=-penalty,
+                    account=account,
                 )
                 await self._save_players()
                 await self._save_logs()
             await ctx.send(
-                f"🎣 釣魚違規，被罰款 {penalty:,} 塊（銀行餘額的 {events['fine_bank_rate']:.1%}）。"
+                f"🎣 釣魚違規，被罰款 {penalty:,} 塊（從{'錢包' if account == 'wallet' else '銀行'}扣除）。"
             )
             return
 
