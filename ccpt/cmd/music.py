@@ -104,15 +104,36 @@ class GuildMusicPlayer:
     def after_play(error):
       if error:
         print(f"音樂播放錯誤（{guild.id}）：{error}")
-      if guild.id in self.stop_requested:
-        self.stop_requested.discard(guild.id)
-        return
-      asyncio.run_coroutine_threadsafe(self.play_next(guild), loop)
+      asyncio.run_coroutine_threadsafe(
+        self.handle_track_finished(guild),
+        loop,
+      )
 
     voice.play(source, after=after_play)
     channel = self.text_channels.get(guild.id)
     if channel:
       await channel.send(f"🎵 正在播放：**{track.title}**")
+
+  async def handle_track_finished(self, guild: discord.Guild):
+    """Wait for discord.py's audio thread to fully stop before continuing."""
+    if guild.id in self.stop_requested:
+      self.stop_requested.discard(guild.id)
+      return
+
+    voice = guild.voice_client
+    for _ in range(20):
+      if voice is None or not voice.is_playing():
+        break
+      await asyncio.sleep(0.1)
+
+    # AudioPlayer.stop() marks the source finished before its worker thread
+    # exits. Force-clear that short-lived state so the next track or the
+    # automatic disconnect is not skipped.
+    if voice and voice.is_playing():
+      voice.stop()
+      await asyncio.sleep(0.1)
+
+    await self.play_next(guild)
 
   async def disconnect(self, guild: discord.Guild, announce=False):
     if guild.id in self.disconnecting:
@@ -141,7 +162,7 @@ class GuildMusicPlayer:
     if announce:
       channel = self.text_channels.get(guild.id)
       if channel:
-        await channel.send("🎵 播放完畢，已離開語音頻道。")
+        await channel.send("🎵 播放完畢，高歌離席~。")
 
 
 class Music(commands.Cog):
