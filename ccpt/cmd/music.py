@@ -30,6 +30,8 @@ class GuildMusicPlayer:
     self.text_channels: dict[int, discord.abc.Messageable] = {}
     self.volumes = defaultdict(lambda: 0.5)
     self.locks = defaultdict(asyncio.Lock)
+    self.disconnecting: set[int] = set()
+    self.stop_requested: set[int] = set()
 
   def queue_for(self, guild_id: int):
     return self.queues[guild_id]
@@ -67,6 +69,9 @@ class GuildMusicPlayer:
     return await asyncio.to_thread(_extract)
 
   async def play_next(self, guild: discord.Guild):
+    if guild.id in self.disconnecting:
+      return
+
     voice = guild.voice_client
     if voice is None or not voice.is_connected() or voice.is_playing():
       return
@@ -74,6 +79,7 @@ class GuildMusicPlayer:
     queue = self.queue_for(guild.id)
     if not queue:
       self.current[guild.id] = None
+      await self.disconnect(guild, announce=True)
       return
 
     track = queue.popleft()
@@ -98,6 +104,9 @@ class GuildMusicPlayer:
     def after_play(error):
       if error:
         print(f"音樂播放錯誤（{guild.id}）：{error}")
+      if guild.id in self.stop_requested:
+        self.stop_requested.discard(guild.id)
+        return
       asyncio.run_coroutine_threadsafe(self.play_next(guild), loop)
 
     voice.play(source, after=after_play)
@@ -105,14 +114,34 @@ class GuildMusicPlayer:
     if channel:
       await channel.send(f"🎵 正在播放：**{track.title}**")
 
-  async def disconnect(self, guild: discord.Guild):
+  async def disconnect(self, guild: discord.Guild, announce=False):
+    if guild.id in self.disconnecting:
+      return
+
+    self.disconnecting.add(guild.id)
     voice = guild.voice_client
     self.queue_for(guild.id).clear()
     self.current[guild.id] = None
-    if voice and voice.is_connected():
-      if voice.is_playing() or voice.is_paused():
-        voice.stop()
-      await voice.disconnect()
+    try:
+      if voice:
+        if voice.is_playing() or voice.is_paused():
+          voice.stop()
+        if voice.is_connected():
+          await voice.disconnect(force=True)
+        else:
+          # Bot 被手動踢出時，Discord 可能仍暫時保留舊的 voice_client。
+          voice.cleanup()
+    except (discord.ClientException, discord.HTTPException):
+      logger.exception("清理語音連線時發生錯誤（%s）", guild.id)
+      if voice:
+        voice.cleanup()
+    finally:
+      self.disconnecting.discard(guild.id)
+
+    if announce:
+      channel = self.text_channels.get(guild.id)
+      if channel:
+        await channel.send("🎵 播放完畢，已離開語音頻道。")
 
 
 class Music(commands.Cog):
@@ -130,6 +159,18 @@ class Music(commands.Cog):
 
     voice = ctx.guild.voice_client
     channel = ctx.author.voice.channel
+    bot_voice = ctx.guild.me.voice if ctx.guild.me else None
+
+    # Bot 被手動踢出後，voice_client 可能會短暫殘留，導致下一次加入
+    # 被誤判成「已在另一個語音頻道」。
+    if voice and (
+      not voice.is_connected()
+      or bot_voice is None
+      or bot_voice.channel != voice.channel
+    ):
+      await self.player.disconnect(ctx.guild)
+      voice = None
+
     if voice is None:
       try:
         voice = await channel.connect()
@@ -233,6 +274,7 @@ class Music(commands.Cog):
     voice = ctx.guild.voice_client
     self.player.queue_for(ctx.guild.id).clear()
     if voice and (voice.is_playing() or voice.is_paused()):
+      self.player.stop_requested.add(ctx.guild.id)
       voice.stop()
     self.player.current[ctx.guild.id] = None
     await ctx.send("⏹️ 已停止播放並清空佇列。")
