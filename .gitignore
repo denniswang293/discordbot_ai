@@ -4,6 +4,7 @@ __pycache__/
 .config/
 .local/
 data/*.db
+data/*.mp3
 data/*.db-*
 data/backups/
 data/json/*.json

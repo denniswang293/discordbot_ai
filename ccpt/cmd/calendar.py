@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio, logging, os, shlex
 from datetime import date, datetime, timedelta
+from pathlib import Path
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
@@ -9,6 +10,9 @@ from .calendar_parser import TZ, parse_date, parse_month, parse_time_spec, weekd
 from .calendar_service import CalendarService
 
 load_dotenv(); log=logging.getLogger('ai_calendar')
+
+SLEEP_GUILD_ID = 968815824498479134
+SLEEP_AUDIO_PATH = Path(__file__).resolve().parents[2] / 'data' / 'sleep.mp3'
 
 HELP='''📅 AI Calendar 使用說明
 ai-calendar add <日期> <時間> <事件名稱>
@@ -27,8 +31,11 @@ ai-calendar undo
 
 class CalendarCog(commands.Cog):
     def __init__(self, bot):
-        self.bot=bot; self.db=CalendarDB(os.getenv('CALENDAR_DB_PATH','data/calendar.db')); self.service=CalendarService(self.db); self.lock=asyncio.Lock(); self.channel_id=int(os.getenv('CALENDAR_CHANNEL_ID','0') or 0); self.owner_id=int(os.getenv('CALENDAR_OWNER_ID','0') or 0); self.message_id=int(self.db.setting('calendar_message_id') or 0); self.days=int(os.getenv('CALENDAR_DAYS','14') or 14); self.refresh_loop.start()
-    def cog_unload(self): self.refresh_loop.cancel(); self.db.close()
+        self.bot=bot; self.db=CalendarDB(os.getenv('CALENDAR_DB_PATH','data/calendar.db')); self.service=CalendarService(self.db); self.lock=asyncio.Lock(); self.channel_id=int(os.getenv('CALENDAR_CHANNEL_ID','0') or 0); self.owner_id=int(os.getenv('CALENDAR_OWNER_ID','0') or 0); self.message_id=int(self.db.setting('calendar_message_id') or 0); self.days=int(os.getenv('CALENDAR_DAYS','14') or 14); self.midnight_sleep_task=None; self.refresh_loop.start()
+    def cog_unload(self):
+        self.refresh_loop.cancel()
+        if self.midnight_sleep_task and not self.midnight_sleep_task.done(): self.midnight_sleep_task.cancel()
+        self.db.close()
     def allowed_channel(self,m): return self.channel_id and m.channel.id==self.channel_id
     def allowed_owner(self,m): return not self.owner_id or m.author.id==self.owner_id
     async def temporary(self, channel, text, seconds=20):
@@ -44,12 +51,59 @@ class CalendarCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def refresh_loop(self):
         now=datetime.now(TZ)
+        if now.hour==0 and now.minute==0 and (self.midnight_sleep_task is None or self.midnight_sleep_task.done()):
+            self.midnight_sleep_task=asyncio.create_task(self.play_midnight_sleep(),name='midnight-sleep-audio')
+            self.midnight_sleep_task.add_done_callback(self._midnight_sleep_done)
         if now.hour==0 and now.minute==1:
             try: self.db.backup()
             except Exception: log.exception('Calendar backup failed')
             await self.refresh()
     @refresh_loop.before_loop
     async def before_refresh(self): await self.bot.wait_until_ready()
+    def _midnight_sleep_done(self, task):
+        if task.cancelled(): return
+        try: task.result()
+        except Exception: log.exception('Midnight sleep audio task failed')
+    async def play_midnight_sleep(self):
+        guild=self.bot.get_guild(SLEEP_GUILD_ID)
+        if guild is None:
+            log.warning('Sleep audio guild %s not found',SLEEP_GUILD_ID); return
+        if not SLEEP_AUDIO_PATH.is_file():
+            log.error('Sleep audio file not found: %s',SLEEP_AUDIO_PATH); return
+        # Take one midnight snapshot so members joining later are not repeatedly targeted.
+        channels=[channel for channel in guild.voice_channels if any(not member.bot for member in channel.members)]
+        for channel in channels:
+            if not any(not member.bot for member in channel.members): continue
+            existing_voice=guild.voice_client
+            if existing_voice is not None:
+                if existing_voice.is_connected():
+                    log.warning('Skipping sleep audio in %s: guild voice connection is already in use',channel.id); continue
+                existing_voice.cleanup()
+            voice=None
+            try:
+                voice=await channel.connect()
+                finished=asyncio.get_running_loop().create_future()
+                loop=asyncio.get_running_loop()
+                def after_play(error, finished=finished, loop=loop):
+                    def complete():
+                        if not finished.done(): finished.set_result(error)
+                    try: loop.call_soon_threadsafe(complete)
+                    except RuntimeError: pass
+                source=discord.FFmpegPCMAudio(str(SLEEP_AUDIO_PATH),executable=os.getenv('FFMPEG_PATH','ffmpeg'),options='-vn')
+                voice.play(source,after=after_play)
+                error=await asyncio.wait_for(finished,timeout=60)
+                if error: log.error('Sleep audio playback failed in channel %s: %s',channel.id,error)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception('Unable to play sleep audio in channel %s',channel.id)
+            finally:
+                if voice is not None:
+                    try:
+                        if voice.is_playing() or voice.is_paused(): voice.stop()
+                        if voice.is_connected(): await voice.disconnect(force=True)
+                        else: voice.cleanup()
+                    except Exception: log.exception('Unable to leave sleep audio channel %s',channel.id)
     async def refresh(self):
         if not self.channel_id: return
         channel=self.bot.get_channel(self.channel_id)
