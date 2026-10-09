@@ -73,7 +73,7 @@ def convert_steam_url(value):
 
   if host in {"store.steampowered.com", "www.store.steampowered.com"}:
     game_id = _steam_game_id(value)
-    return f"steam://store/{game_id}" if game_id else None
+    return f"https://freestuffbot.xyz/ext/open-client/steam/{game_id}" if game_id else None
 
   if host not in {"steamcommunity.com", "www.steamcommunity.com"}:
     return None
