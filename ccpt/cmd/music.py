@@ -519,7 +519,7 @@ class Music(commands.Cog):
         await ctx.send(
           f"🎲 已啟動隨機播放：**{session.title}**"
           f"（{len(session.entries)} 首）\n"
-          "每次只解析下一首；使用 `ai-stop` 停止。"
+          "使用 `ai-stop` 停止。"
         )
         if self.player.random_playlists.get(guild_id) is not session:
           return
