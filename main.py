@@ -27,6 +27,11 @@ intents = discord.Intents().all()
 bot = commands.Bot(command_prefix="ai-", intents=intents)
 #bot.remove_command('help')#内建的help去除程式
 
+# 每個頻道各自保留上一則非機器人文字訊息。
+last_message_by_channel: dict[int, str] = {}
+repeat_cooldown_by_channel: dict[int, float] = {}
+REPEAT_COOLDOWN_SECONDS = 10 * 60
+
 with open(JSON_DIR / "data.json", "r", encoding="utf8") as file:
     dict_data = json.loads(file.read())
 
@@ -197,8 +202,27 @@ async def test(ctx, channel: Optional[discord.TextChannel], *, msg: commands.cle
 
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author.bot:
         return
+
+    if message.content:
+        channel_id = message.channel.id
+        now = time.monotonic()
+        cooldown_until = repeat_cooldown_by_channel.get(channel_id, 0)
+
+        if now >= cooldown_until:
+            repeat_cooldown_by_channel.pop(channel_id, None)
+            previous_content = last_message_by_channel.get(channel_id)
+            last_message_by_channel[channel_id] = message.content
+
+            if previous_content == message.content:
+                repeat_cooldown_by_channel[channel_id] = now + REPEAT_COOLDOWN_SECONDS
+                last_message_by_channel.pop(channel_id, None)
+                await message.channel.send(
+                    message.content,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+
     if message.channel.id == 1228204874429235290:
         mentioned = bot.user.mentioned_in(message)
         is_reply_to_me = False
